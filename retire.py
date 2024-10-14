@@ -13,7 +13,6 @@ def calculate_total_assets(current_total_asset, initial_expense, inflation_rate,
     compound_inflation_rate = 1  # To calculate the compound inflation rate
 
     for year in range(1, years_to_live):
-        # Update compound inflation rate based on custom inflation rates in special years
         if year == special_year_1:
             compound_inflation_rate *= (1 + custom_inflation_rate_1)
             expense = custom_spending_1
@@ -23,15 +22,12 @@ def calculate_total_assets(current_total_asset, initial_expense, inflation_rate,
             expense = custom_spending_2
             current_growth_rate = custom_growth_rate_2
         else:
-            # Normal inflation year
             compound_inflation_rate *= (1 + inflation_rate)
             expense = initial_expense * compound_inflation_rate
             current_growth_rate = investment_growth_rate
 
-        # Calculate new total assets after growth and expense
         current_total_asset = current_total_asset * (1 + current_growth_rate) - expense
 
-        # If assets run out, stop calculations
         if current_total_asset < 0:
             total_assets.extend([0] * (years_to_live - year))
             break
@@ -65,30 +61,45 @@ app = dash.Dash(__name__)
 app.layout = html.Div([
     html.H1("Retirement Asset Projection"),
 
-    # Sliders for input parameters
-    html.Label("Initial Total Assets:"),
+    # Sliders for input parameters with dynamic values displayed
+    html.Div([
+        html.Label("Initial Total Assets: "),
+        html.Span(id='total-asset-value', style={'fontWeight': 'bold'}),
+    ]),
     dcc.Slider(id='total-asset-slider', min=1000000, max=10000000, step=50000, value=4000000,
                marks={i: f"${i // 1000}K" for i in range(1000000, 10000001, 1000000)}),
 
-    html.Label("Inflation Rate (%):"),
+    html.Div([
+        html.Label("Inflation Rate (%): "),
+        html.Span(id='inflation-rate-value', style={'fontWeight': 'bold'}),
+    ]),
     dcc.Slider(id='inflation-slider', min=0, max=0.1, step=0.001, value=0.05,
                marks={i: f"{i * 100:.0f}%" for i in np.arange(0, 0.11, 0.01)}),
 
-    html.Label("Investment Growth Rate (%):"),
+    html.Div([
+        html.Label("Investment Growth Rate (%): "),
+        html.Span(id='growth-rate-value', style={'fontWeight': 'bold'}),
+    ]),
     dcc.Slider(id='growth-slider', min=0, max=0.15, step=0.001, value=0.07,
                marks={i: f"{i * 100:.0f}%" for i in np.arange(0, 0.16, 0.01)}),
 
-    html.Label("Annual Expense (1st Year):"),
+    html.Div([
+        html.Label("Annual Expense (1st Year): "),
+        html.Span(id='expense-value', style={'fontWeight': 'bold'}),
+    ]),
     dcc.Slider(id='expense-slider', min=50000, max=500000, step=5000, value=100000,
                marks={i: f"${i // 1000}K" for i in range(50000, 500001, 50000)}),
 
-    html.Label("Years to Live:"),
+    html.Div([
+        html.Label("Years to Live: "),
+        html.Span(id='years-to-live-value', style={'fontWeight': 'bold'}),
+    ]),
     dcc.Slider(id='years-slider', min=10, max=50, step=1, value=35,
                marks={i: f"{i}" for i in range(10, 51, 5)}),
 
     # Special event 1 input
     html.H3("Special Event 1"),
-    html.Label("Special Year 1 (e.g. 5):"),
+    html.Label("Special Year 1 (e.g. 5): "),
     dcc.Input(id='special-year-input-1', type='number', placeholder='Year #', min=1, max=50, step=1),
 
     html.Div(id='special-year-settings-1', children=[
@@ -104,7 +115,7 @@ app.layout = html.Div([
 
     # Special event 2 input
     html.H3("Special Event 2"),
-    html.Label("Special Year 2 (e.g. 10):"),
+    html.Label("Special Year 2 (e.g. 10): "),
     dcc.Input(id='special-year-input-2', type='number', placeholder='Year #', min=1, max=50, step=1),
 
     html.Div(id='special-year-settings-2', children=[
@@ -121,6 +132,47 @@ app.layout = html.Div([
     # Graph to display the result
     dcc.Graph(id='asset-graph')
 ])
+
+
+# Callback to update the displayed values next to each slider
+@app.callback(
+    Output('total-asset-value', 'children'),
+    Input('total-asset-slider', 'value')
+)
+def update_total_asset_display(value):
+    return f"${value:,.0f}"
+
+
+@app.callback(
+    Output('inflation-rate-value', 'children'),
+    Input('inflation-slider', 'value')
+)
+def update_inflation_rate_display(value):
+    return f"{value * 100:.2f}%"
+
+
+@app.callback(
+    Output('growth-rate-value', 'children'),
+    Input('growth-slider', 'value')
+)
+def update_growth_rate_display(value):
+    return f"{value * 100:.2f}%"
+
+
+@app.callback(
+    Output('expense-value', 'children'),
+    Input('expense-slider', 'value')
+)
+def update_expense_display(value):
+    return f"${value:,.0f}"
+
+
+@app.callback(
+    Output('years-to-live-value', 'children'),
+    Input('years-slider', 'value')
+)
+def update_years_to_live_display(value):
+    return f"{value}"
 
 
 # Callback to auto-populate the special year 1 spending based on natural growth
