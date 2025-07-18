@@ -3,55 +3,60 @@ import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output
 import plotly.graph_objects as go
-import multiprocessing as mp
 import time
 from numba import njit
 
-# Updated sampling distributions based on historical data
 INFLATION_MEAN = 0.025
 INFLATION_STD = 0.02
 SP500_MEAN = 0.105
 SP500_STD = 0.20
 
+@njit
+def single_simulation_batch_numba(initial_asset, annual_expense, years_to_live, batch_size):
+    results = np.zeros((batch_size, years_to_live))
+    avg_growths = np.zeros(batch_size)
+    avg_inflations = np.zeros(batch_size)
 
-def single_simulation_batch(batch):
-    results = []
-    avg_growths = []
-    avg_inflations = []
-    for initial_asset, annual_expense, years_to_live in batch:
-        growths = []
-        inflations = []
+    for b in range(batch_size):
         asset = initial_asset
         history = np.zeros(years_to_live)
+        growth_sum = 0.0
+        inflation_sum = 0.0
+
         for year in range(years_to_live):
             g = np.random.normal(SP500_MEAN, SP500_STD)
             i = np.random.normal(INFLATION_MEAN, INFLATION_STD)
-            growths.append(g)
-            inflations.append(i)
+            growth_sum += g
+            inflation_sum += i
             expense = annual_expense * ((1 + i) ** year)
             asset = asset * (1 + g) - expense
             if asset < 0:
                 history[year:] = 0
                 break
             history[year] = asset
-        results.append(history)
-        avg_growths.append(np.mean(growths))
-        avg_inflations.append(np.mean(inflations))
+
+        results[b, :] = history
+        avg_growths[b] = growth_sum / years_to_live
+        avg_inflations[b] = inflation_sum / years_to_live
+
     return results, avg_growths, avg_inflations
 
-def simulate_asset_projection(initial_asset, annual_expense, years_to_live, n_simulations=100000, batch_size=100):
-    batches = [
-        [(initial_asset, annual_expense, years_to_live)] * batch_size
-        for _ in range(n_simulations // batch_size)
-    ]
-    with mp.Pool(processes=mp.cpu_count()) as pool:
-        all_results = pool.map(single_simulation_batch, batches)
+def simulate_asset_projection(initial_asset, annual_expense, years_to_live, n_simulations=100000, batch_size=1000):
+    num_batches = n_simulations // batch_size
+    all_results = []
+    all_growths = []
+    all_inflations = []
 
-    results = [sim for batch in all_results for sim in batch[0]]
-    all_growths = [g for batch in all_results for g in batch[1]]
-    all_inflations = [i for batch in all_results for i in batch[2]]
+    for _ in range(num_batches):
+        results, growths, inflations = single_simulation_batch_numba(initial_asset, annual_expense, years_to_live, batch_size)
+        all_results.append(results)
+        all_growths.append(growths)
+        all_inflations.append(inflations)
 
-    results = np.array(results)
+    results = np.vstack(all_results)
+    all_growths = np.concatenate(all_growths)
+    all_inflations = np.concatenate(all_inflations)
+
     median = np.median(results, axis=0)
     lower = np.percentile(results, 10, axis=0)
     upper = np.percentile(results, 90, axis=0)
@@ -63,28 +68,24 @@ app = dash.Dash(__name__)
 
 app.layout = html.Div([
     html.H1("Retirement Asset Projection with Monte Carlo Simulation"),
-
     html.Div([
         html.Label("Initial Total Assets: "),
         html.Span(id='total-asset-value', style={'fontWeight': 'bold'}),
     ]),
     dcc.Slider(id='total-asset-slider', min=1000000, max=10000000, step=50000, value=5000000,
                marks={i: f"${i // 1000}K" for i in range(1000000, 10000001, 1000000)}),
-
     html.Div([
         html.Label("Annual Expense (1st Year): "),
         html.Span(id='expense-value', style={'fontWeight': 'bold'}),
     ]),
     dcc.Slider(id='expense-slider', min=50000, max=500000, step=5000, value=100000,
                marks={i: f"${i // 1000}K" for i in range(50000, 500001, 50000)}),
-
     html.Div([
         html.Label("Years to Live: "),
         html.Span(id='years-to-live-value', style={'fontWeight': 'bold'}),
     ]),
     dcc.Slider(id='years-slider', min=10, max=50, step=1, value=35,
                marks={i: f"{i}" for i in range(10, 51, 5)}),
-
     dcc.Loading(
         id="loading-graph",
         type="circle",
@@ -132,7 +133,6 @@ def update_graph(initial_asset, annual_expense, years_to_live):
     fig.add_trace(go.Scatter(x=years, y=median, mode='lines', name='Median'))
     fig.add_trace(go.Scatter(x=years, y=upper, mode='lines', name='90th Percentile', line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=years, y=lower, mode='lines', name='10th Percentile', fill='tonexty', line=dict(width=0), showlegend=True))
-
     fig.update_layout(title='Monte Carlo Simulation: Portfolio Balance Over Time',
                       xaxis_title='Years',
                       yaxis_title='Total Assets ($)',
@@ -155,8 +155,7 @@ def update_graph(initial_asset, annual_expense, years_to_live):
                          html.Td(f"${upper[-1] / real_factor:,.0f}")]),
                 html.Tr([html.Td("Input: Avg Inflation Rate"), html.Td(f"{INFLATION_MEAN * 100:.2f}%"), html.Td("—")]),
                 html.Tr([html.Td("Input: Avg Growth Rate"), html.Td(f"{SP500_MEAN * 100:.2f}%"), html.Td("—")]),
-                html.Tr(
-                    [html.Td("Simulated Avg Inflation Rate"), html.Td(f"{avg_inflation * 100:.2f}%"), html.Td("—")]),
+                html.Tr([html.Td("Simulated Avg Inflation Rate"), html.Td(f"{avg_inflation * 100:.2f}%"), html.Td("—")]),
                 html.Tr([html.Td("Simulated Avg Growth Rate"), html.Td(f"{avg_growth * 100:.2f}%"), html.Td("—")]),
                 html.Tr([html.Td("Simulation Time"), html.Td(f"{duration:.2f} seconds", colSpan=2)])
             ])
