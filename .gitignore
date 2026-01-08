@@ -1,0 +1,30 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Java/Maven (from pom.xml artifacts)
+target/
+*.class
+dependency-reduced-pom.xml
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
