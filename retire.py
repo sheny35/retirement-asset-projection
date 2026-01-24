@@ -1,4 +1,5 @@
 
+import os
 import numpy as np
 import dash
 from dash import dcc, html
@@ -315,4 +316,7 @@ def update_graph(initial_asset, annual_expense, years_to_live, inflation_mean, g
     return fig, html.Div([asset_table, tech_table]), key_results
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    debug_mode = os.environ.get('DEBUG', 'false').lower() == 'true'
+    host = os.environ.get('HOST', '0.0.0.0')
+    port = int(os.environ.get('PORT', '8050'))
+    app.run(host=host, port=port, debug=debug_mode)
