@@ -113,8 +113,11 @@ The application uses Numba's JIT compilation to achieve high-performance simulat
 ## Files
 
 - `retire.py`: Main application file containing simulation engine and web interface
-- `Claude.md`: This file - project documentation
+- `Dockerfile`: Container configuration for Docker deployment
+- `requirements.txt`: Python dependencies with version constraints
+- `CLAUDE.md`: This file - project documentation
 - `IMPROVEMENTS.md`: Detailed documentation of recent UX improvements
+- `.github/workflows/docker-publish.yml`: GitHub Actions workflow for CI/CD
 - `tmp.py`: Unrelated algorithm (meeting room scheduling problem)
 
 ## Dependencies
@@ -144,6 +147,59 @@ python3 retire.py
 ```
 
 The dashboard will be available at `http://127.0.0.1:8050/` in debug mode.
+
+### Using Docker
+
+```bash
+# Pull from Docker Hub
+docker pull <dockerhub-username>/retirement-asset-projection:latest
+
+# Run the container
+docker run -p 8050:8050 <dockerhub-username>/retirement-asset-projection:latest
+```
+
+The dashboard will be available at `http://localhost:8050/`.
+
+## CI/CD
+
+### GitHub Actions
+
+The project uses GitHub Actions for continuous integration and deployment. The workflow automatically builds and pushes Docker images to Docker Hub.
+
+#### Workflow: Build and Push Docker Image
+
+**Location**: `.github/workflows/docker-publish.yml`
+
+**Triggers**:
+- Push to `main` branch (when relevant files change)
+- Manual trigger via `workflow_dispatch`
+
+**Monitored Files**:
+- `retire.py`
+- `requirements.txt`
+- `Dockerfile`
+- `.github/workflows/docker-publish.yml`
+
+**What It Does**:
+1. Checks out the repository
+2. Sets up Docker Buildx for efficient builds
+3. Authenticates with Docker Hub
+4. Builds the Docker image with layer caching
+5. Pushes to Docker Hub with two tags:
+   - `latest` (for main branch)
+   - Git commit SHA (for version tracking)
+
+**Required Secrets**:
+- `DOCKERHUB_USERNAME`: Docker Hub username
+- `DOCKERHUB_TOKEN`: Docker Hub access token
+
+### Docker Configuration
+
+The `Dockerfile` uses Python 3.11-slim as the base image and:
+- Installs gcc for Numba compilation
+- Copies and installs Python dependencies
+- Exposes port 8050
+- Runs with debug mode disabled by default
 
 ## Recent Improvements (Jan 2026)
 
