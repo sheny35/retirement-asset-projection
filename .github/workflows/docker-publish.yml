@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0, v1.2.3
     paths:
       - 'retire.py'
       - 'requirements.txt'
@@ -13,10 +15,13 @@ on:
 
 env:
   DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/retirement-asset-projection
+  ARGOCD_REPO: sheny35/retirement-asset-projection-argocd
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.get_tag.outputs.tag }}
 
     steps:
       - name: Checkout repository
@@ -39,6 +44,8 @@ jobs:
           tags: |
             type=sha,prefix=
             type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -49,3 +56,38 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Get image tag for ArgoCD
+        id: get_tag
+        run: echo "tag=${{ steps.meta.outputs.version }}" >> $GITHUB_OUTPUT
+
+  update-argocd-dev:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    # Only run for branch pushes, not tag pushes (tags are for prod releases)
+    if: github.ref_type == 'branch'
+
+    steps:
+      - name: Checkout ArgoCD repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.ARGOCD_REPO }}
+          token: ${{ secrets.ARGOCD_REPO_PAT }}
+          path: argocd-repo
+
+      - name: Update dev image tag
+        run: |
+          cd argocd-repo
+          NEW_TAG="${{ needs.build-and-push.outputs.image_tag }}"
+          sed -i "s/tag: \".*\"/tag: \"${NEW_TAG}\"/" charts/retirement-asset-projection/values-dev.yaml
+          echo "Updated dev image tag to: ${NEW_TAG}"
+          cat charts/retirement-asset-projection/values-dev.yaml
+
+      - name: Commit and push changes
+        run: |
+          cd argocd-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add charts/retirement-asset-projection/values-dev.yaml
+          git diff --staged --quiet || git commit -m "Update dev image tag to ${{ needs.build-and-push.outputs.image_tag }}"
+          git push
