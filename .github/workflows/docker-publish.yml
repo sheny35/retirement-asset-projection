@@ -18,8 +18,10 @@ env:
   ARGOCD_REPO: sheny35/retirement-asset-projection-argocd
 
 jobs:
+  # Job for branch pushes: build and push new image
   build-and-push:
     runs-on: ubuntu-latest
+    if: github.ref_type == 'branch'
     outputs:
       image_tag: ${{ steps.get_tag.outputs.tag }}
 
@@ -44,8 +46,6 @@ jobs:
           tags: |
             type=sha,prefix=
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -61,10 +61,10 @@ jobs:
         id: get_tag
         run: echo "tag=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
+  # Job for branch pushes: update ArgoCD dev environment
   update-argocd-dev:
     needs: build-and-push
     runs-on: ubuntu-latest
-    # Only run for branch pushes, not tag pushes (tags are for prod releases)
     if: github.ref_type == 'branch'
 
     steps:
@@ -90,4 +90,100 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add charts/retirement-asset-projection/values-dev.yaml
           git diff --staged --quiet || git commit -m "Update dev image tag to ${{ needs.build-and-push.outputs.image_tag }}"
+          git push
+
+  # Job for tag pushes: tag existing image for production release
+  tag-for-release:
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          # Extract version from tag (v1.0.0 -> 1.0.0)
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Release version: ${VERSION}"
+
+      - name: Get commit SHA for this tag
+        id: get_sha
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "Commit SHA: ${SHORT_SHA}"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Check if image exists and add release tags
+        run: |
+          SHORT_SHA=${{ steps.get_sha.outputs.sha }}
+          VERSION=${{ steps.get_version.outputs.version }}
+
+          # Check if the SHA-tagged image exists
+          echo "Checking if image ${{ env.DOCKER_IMAGE }}:${SHORT_SHA} exists..."
+          if ! docker manifest inspect ${{ env.DOCKER_IMAGE }}:${SHORT_SHA} > /dev/null 2>&1; then
+            echo "ERROR: Image with tag ${SHORT_SHA} does not exist!"
+            echo "Please ensure the commit has been built before creating a release tag."
+            exit 1
+          fi
+
+          echo "Image found. Adding release tags..."
+
+          # Pull the existing image
+          docker pull ${{ env.DOCKER_IMAGE }}:${SHORT_SHA}
+
+          # Tag with semver versions
+          docker tag ${{ env.DOCKER_IMAGE }}:${SHORT_SHA} ${{ env.DOCKER_IMAGE }}:${VERSION}
+
+          # Extract major.minor for additional tag (e.g., 1.0.0 -> 1.0)
+          MAJOR_MINOR=$(echo ${VERSION} | cut -d. -f1,2)
+          docker tag ${{ env.DOCKER_IMAGE }}:${SHORT_SHA} ${{ env.DOCKER_IMAGE }}:${MAJOR_MINOR}
+
+          # Push the new tags
+          docker push ${{ env.DOCKER_IMAGE }}:${VERSION}
+          docker push ${{ env.DOCKER_IMAGE }}:${MAJOR_MINOR}
+
+          echo "Successfully tagged and pushed:"
+          echo "  - ${{ env.DOCKER_IMAGE }}:${VERSION}"
+          echo "  - ${{ env.DOCKER_IMAGE }}:${MAJOR_MINOR}"
+
+  # Job for tag pushes: update ArgoCD prod environment
+  update-argocd-prod:
+    needs: tag-for-release
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+
+    steps:
+      - name: Checkout ArgoCD repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.ARGOCD_REPO }}
+          token: ${{ secrets.ARGOCD_REPO_PAT }}
+          path: argocd-repo
+
+      - name: Update prod image tag
+        run: |
+          cd argocd-repo
+          NEW_TAG="${{ needs.tag-for-release.outputs.version }}"
+          sed -i "s/tag: \".*\"/tag: \"${NEW_TAG}\"/" charts/retirement-asset-projection/values-prod.yaml
+          echo "Updated prod image tag to: ${NEW_TAG}"
+          cat charts/retirement-asset-projection/values-prod.yaml
+
+      - name: Commit and push changes
+        run: |
+          cd argocd-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add charts/retirement-asset-projection/values-prod.yaml
+          git diff --staged --quiet || git commit -m "Release: Update prod image tag to ${{ needs.tag-for-release.outputs.version }}"
           git push
