@@ -117,7 +117,7 @@ app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 
 app.layout = html.Div([
     html.Div([
-        html.H1("Retirement Asset Projection with Monte Carlo Simulation", className="text-center my-4"),
+        html.H1("Retirement Asset Projection", className="text-center my-4"),
 
         # Key Results Section (will be populated by callback)
         dcc.Loading(
