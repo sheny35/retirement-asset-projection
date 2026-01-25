@@ -59,7 +59,7 @@ jobs:
 
       - name: Get image tag for ArgoCD
         id: get_tag
-        run: echo "tag=${{ steps.meta.outputs.version }}" >> $GITHUB_OUTPUT
+        run: echo "tag=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
   update-argocd-dev:
     needs: build-and-push
